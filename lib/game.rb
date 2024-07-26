@@ -1,26 +1,26 @@
+require "yaml"
 require_relative "text_content"
-require_relative "serializable"
 class Game
   include TextContent
-  include Serializable
+
+  MAX_ATTEMPTS = 7
+  SAVE_DIRECTORY = 'game_saves'
 
   def initialize
-    explain_the_game
-    if option_to_play_new_game
-      @secret_word = generate_secret_word
-      @guessed_letters = {
-        "correct_letters" => [],
-        "incorrect_letters" => []
-      }
-      @attempts_left = 7
-    else
-      update_to_previous_game_state!
-    end
+    @secret_word = generate_secret_word
+    @guessed_letters = { correct: [], incorrect: [] }
+    @attempts_left = MAX_ATTEMPTS
   end
 
-  def start
+  def start 
     loop do
-      play_a_round!
+      display_game_state
+      letter = guess_letter
+      if letter == 'save'
+        save_game
+        break
+      end  
+      update_game_state!(letter)
       if word_guessed?
         show_game_result(true, @secret_word)
         break
@@ -28,12 +28,52 @@ class Game
         show_game_result(false, @secret_word)
         break
       end
-      next unless option_to_save?
-
-      save_game_state
-      puts "Your game is saved!"
-      break
     end
+  end
+
+
+  def self.start
+    explain_the_game
+    puts "1. New Game"
+    puts "2. Load Game"
+    choice = gets.chomp
+    return start unless choice.between?('1','2')
+    game = if choice == '2'
+            puts Dir.entries("#{SAVE_DIRECTORY}")
+            print "Enter the saved game filename: "
+            load_game(gets.chomp)
+          else
+            self.new
+          end
+    game.start
+  end
+
+  def self.load_game(filename)
+    if File.exist?("#{SAVE_DIRECTORY}/#{filename}")
+      YAML.safe_load(File.read("#{SAVE_DIRECTORY}/#{filename}"), permitted_classes: [Symbol, self])
+    else
+      puts "Starting a new game."
+      new
+    end
+  end 
+  
+  def self.explain_the_game
+    puts <<~HEREDOC
+      Welcome to Hangman!
+
+      The objective of the game is to guess the secret word before the hangman is fully drawn.
+
+      Rules:
+      1. The computer will randomly select a secret word.
+      2. You will see a series of underscores representing the letters in the word.
+      3. Your task is to guess the letters in the word one at a time.
+      4. Each time you guess a letter correctly, the corresponding underscores will be replaced with that letter.
+      5. If you guess a letter that is not in the word, a part of the hangman will be drawn.
+      6. You have a limited number of incorrect guesses before the hangman is fully drawn.
+      7. The game ends when you either guess the entire word correctly or the hangman is fully drawn.
+
+      Your goal is to crack the secret code before the man gets hanged. Good luck!
+    HEREDOC
   end
 
   private
@@ -47,88 +87,44 @@ class Game
     word_list.select { |word| word.length.between?(5, 12) }.sample
   end
 
-  def play_a_round!
-    progress = current_progress
-    incorrect_guesses = @guessed_letters["incorrect_letters"]
-    show_game_info(progress, incorrect_guesses, @attempts_left)
-    letter = guess_letter
-    update_guessed_letters! letter
-  end
-
   def guess_letter
-    print "Enter a letter from range a to z: "
-    letter = gets.chomp.downcase
-    guessed_letters = @guessed_letters.values.flatten
-    unless letter.match?(/\A[a-z]*\z/)
-      puts "#{letter} is not valid!"
-      return guess_letter
-    end
-    if guessed_letters.include? letter
-      puts "#{letter} has already been entered!"
-      return guess_letter
-    end
-    letter
+    print "\nEnter a letter (a-z) or 'save' to save the game: "
+    input = gets.chomp.downcase
+    return 'save' if input == 'save'
+    return guess_letter unless input.match?(/\A[a-z]\z/)
+    return guess_letter if @guessed_letters.values.flatten.include?(input)
+    input
   end
 
-  def update_guessed_letters!(letter)
+  def update_game_state!(letter)
     if @secret_word.include? letter
-      @guessed_letters["correct_letters"] << letter
+      @guessed_letters[:correct] << letter
+      puts "Good guess!"
     else
-      @guessed_letters["incorrect_letters"] << letter
+      @guessed_letters[:incorrect] << letter
       @attempts_left -= 1
-      puts "You guessed the wrong letter!\n"
+      puts "Incorrect guess!"
     end
   end
 
   def current_progress
-    progress = []
-    @secret_word.each_char do |char|
-      progress << if  @guessed_letters["correct_letters"].include?(char)
-                    char
-                  else
-                    "_"
-                  end
-    end
-    progress
+    @secret_word.chars.map { |char| @guessed_letters[:correct].include?(char) ? char : '_' }
   end
 
   def word_guessed?
-    !current_progress.include?("_")
+    current_progress.join == @secret_word 
   end
 
-  def option_to_save?
-    puts "You can save the game or play.\n1.\tSave\n2.\tContinue"
-    option = gets.chomp.to_i
-    unless option.between?(1, 2)
-      puts "#{option} is not valid!"
-      return option_to_save?
-    end
-    option == 1
+  def save_game
+    Dir.mkdir(SAVE_DIRECTORY) unless Dir.exist?(SAVE_DIRECTORY)
+    filename = "#{SAVE_DIRECTORY}/hangman_#{Time.now.strftime('%Y-%m-%d_%H-%M-%S')}.yaml"
+    File.open(filename, 'w') { |file| file.write(YAML.dump(self)) }
+    puts ("Game saved to #{filename}")
   end
 
-  def save_game_state
-    state = serialize
-    filename = "hangman_game_state"
-    File.open(filename, "w") do |f|
-      f.puts state
-    end
-  end
-
-  def option_to_play_new_game
-    if File.exist? "hangman_game_state"
-      puts "Do you mant to resume your previous game or start new game?\n1.\tResume previous game\n2.\tStart new game"
-      option = gets.to_i
-      unless option.between?(1, 2)
-        puts "#{option} is not valid!"
-        return option_to_play_new_game
-      end
-      return option == 2
-    end
-    true
-  end
-
-  def update_to_previous_game_state!
-    state = File.open("hangman_game_state").gets.chomp
-    unserialize state
+  def display_game_state
+    progress = current_progress
+    incorrect_guesses = @guessed_letters[:incorrect]
+    show_game_info(progress, incorrect_guesses, @attempts_left)
   end
 end
