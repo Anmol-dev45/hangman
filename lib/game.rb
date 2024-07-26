@@ -4,7 +4,7 @@ class Game
   include TextContent
 
   MAX_ATTEMPTS = 7
-  SAVE_DIRECTORY = 'game_saves'
+  SAVE_DIRECTORY = "game_saves".freeze
 
   def initialize
     @secret_word = generate_secret_word
@@ -12,14 +12,14 @@ class Game
     @attempts_left = MAX_ATTEMPTS
   end
 
-  def start 
+  def start
     loop do
       display_game_state
       letter = guess_letter
-      if letter == 'save'
+      if letter == "save"
         save_game
         break
-      end  
+      end
       update_game_state!(letter)
       if word_guessed?
         show_game_result(true, @secret_word)
@@ -31,20 +31,24 @@ class Game
     end
   end
 
-
   def self.start
     explain_the_game
+    unless Dir.exist?(SAVE_DIRECTORY)
+      new.start
+      return
+    end
     puts "1. New Game"
     puts "2. Load Game"
     choice = gets.chomp
-    return start unless choice.between?('1','2')
-    game = if choice == '2'
-            puts Dir.entries("#{SAVE_DIRECTORY}")
-            print "Enter the saved game filename: "
-            load_game(gets.chomp)
-          else
-            self.new
-          end
+    return start unless choice.between?("1", "2")
+
+    game = if choice == "2"
+             puts Dir.entries(SAVE_DIRECTORY)
+             print "Enter the saved game filename: "
+             load_game(gets.chomp)
+           else
+             new
+           end
     game.start
   end
 
@@ -55,8 +59,8 @@ class Game
       puts "Starting a new game."
       new
     end
-  end 
-  
+  end
+
   def self.explain_the_game
     puts <<~HEREDOC
       Welcome to Hangman!
@@ -90,9 +94,10 @@ class Game
   def guess_letter
     print "\nEnter a letter (a-z) or 'save' to save the game: "
     input = gets.chomp.downcase
-    return 'save' if input == 'save'
+    return "save" if input == "save"
     return guess_letter unless input.match?(/\A[a-z]\z/)
     return guess_letter if @guessed_letters.values.flatten.include?(input)
+
     input
   end
 
@@ -108,18 +113,18 @@ class Game
   end
 
   def current_progress
-    @secret_word.chars.map { |char| @guessed_letters[:correct].include?(char) ? char : '_' }
+    @secret_word.chars.map { |char| @guessed_letters[:correct].include?(char) ? char : "_" }
   end
 
   def word_guessed?
-    current_progress.join == @secret_word 
+    current_progress.join == @secret_word
   end
 
   def save_game
     Dir.mkdir(SAVE_DIRECTORY) unless Dir.exist?(SAVE_DIRECTORY)
     filename = "#{SAVE_DIRECTORY}/hangman_#{Time.now.strftime('%Y-%m-%d_%H-%M-%S')}.yaml"
-    File.open(filename, 'w') { |file| file.write(YAML.dump(self)) }
-    puts ("Game saved to #{filename}")
+    File.write(filename, YAML.dump(self))
+    puts("Game saved to #{filename}")
   end
 
   def display_game_state
